@@ -1,0 +1,5 @@
+## postman api key
+config.py
+__pycache__/
+*.csv
+*.json
