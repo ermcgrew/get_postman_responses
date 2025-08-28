@@ -29,35 +29,45 @@ def download_postman_responses():
         df = pd.json_normalize(result_list[i], sep='_')
         ratings = pd.concat([ratings,df])
 
-    logging.info(ratings.info())
     ratings.to_csv(f"ratings_responses_raw_{res_type}_{current_datetime}.csv", index=False, header=True)
 
     return ratings
 
 
-def does_info_exist(container,info_key):
+def does_info_exist(container,info_key, session_name):
     try:
         if container.info[info_key]:   
-            logging.warning('Already have data for this one, skip and flag for manual review.')
+            logging.warning(f"Container {session_name} already contains data, flag for manual review.")
             return True
     except KeyError:
-        # logging.info('no existing data')
         return False
 
 
-def update_flywheel_container(container, info):
-    logging.info(f"updating container with response info.")
-    # container.update_info(info)
-    return
+def update_flywheel_container(container, info, session_name):
+    logging.info(f"updating container {session_name} with response info.")
+    try:
+        container.update_info(info)
+        return 1
+    except:
+        logging.error(f"error updating container")
+        return 0
 
 
-def add_response_to_flywheel(ratings):
+def main():
+    ratings = download_postman_responses()
+    # ratings = pd.read_csv("/Users/emilymcgrew/Library/CloudStorage/Box-Box/scripts/flywheel/get_qc_responses/ratings_responses_raw_20250828_102709.csv")
+    # ratings = pd.read_csv("/Users/emilymcgrew/Library/CloudStorage/Box-Box/scripts/flywheel/get_qc_responses/ratings_responses_raw_incidental_findings_20250828_135718.csv")
     fw = flywheel.Client()
+
+    ### if running weekly with the rename and create tasks script, identify new responses
+    ratings['modified_short'] = ratings['modified'].str.split(".").str[0]
+    ratings['modified_dt'] = pd.to_datetime(ratings['modified_short'])
+    ratings.loc[ratings['modified_dt'] >= weekago_dt, ['new_rating']] = 1
+
+    logging.info(f"{len(ratings.loc[ratings['new_rating'] == 1])} new responses from last week.")
+    update_success = 0
     for index,row in ratings.iterrows():
-        ### if running weekly with the rename and create tasks script 
-        date_test = datetime.strptime(row['modified'].split(".")[0], "%Y-%m-%dT%H:%M:%S")
-        if date_test <= weekago_dt:
-            ## data from before last run, skip
+        if row['new_rating'] != 1:
             continue
         else:
             ### collect response data to add to flywheel container into a dictionary
@@ -71,16 +81,14 @@ def add_response_to_flywheel(ratings):
 
             ### get fw container to add the data to
             session = fw.get(row['parents_session'])
-
-            ### Grab some extra data for the hard copy csv
-            ### TODO: don't add this to the df, capture in another way to send back to main function
-            # ratings.at[index,'INDD'] = session.subject.label
-            # ratings.at[index,'SCANDATE'] = str(session.timestamp)[:10].replace("-", "")
+            session_name = session.label
 
             if res_type == "incidental_findings":
-                if does_info_exist(session,fw_info_key) == False:
-                    update_flywheel_container(session,info_toadd)
+                if does_info_exist(session,fw_info_key, session_name) == False:
+                    update_status = update_flywheel_container(session,info_toadd, session_name)
+                    update_success += update_status
             else: 
+                ### get to fw file container via acqusition
                 try: 
                     acq = fw.get(row['parents_acquisition'])
                 except:
@@ -88,43 +96,17 @@ def add_response_to_flywheel(ratings):
                     continue
                 this_acq = acq.reload()
                 file_rated = [f for f in this_acq.files if f.file_id == row['parents_file']][0]
-                if does_info_exist(file_rated,fw_info_key) == False:
-                    update_flywheel_container(file_rated,info_toadd)
-                
-                ### TODO: dont' add this to df, capture another way?
-                # ratings.at[index,'SEQUENCE_NAME'] = this_acq['label']
+                if does_info_exist(file_rated,fw_info_key, session_name) == False:
+                    update_status = update_flywheel_container(file_rated,info_toadd, session_name)
+                    update_success += update_status
 
-    return ratings
+                    ### TODO: if whole brain value == no or motion value > 3, add "unusable/quarantine" tag?
 
-
-def save_copy_of_ratings(ratings_plus):
-    ratings_plus.info()
-    [print(col) for col in ratings_plus.columns]
-
-    ## pull this as a data view after? already setting up appropriate column names above
-
-    ## cols to keep: response_data_*, INDD, SCANDATE, origin_id, modified, parents_session
-        ### if t1_image_qc: SEQUENCE_NAME, parents_file
-
-    # ratings = ratings.drop(columns=["SESSION_ID", "ACQ_ID", "scan"]).rename(
-    #     columns={'t1_wholebrain':"T1_WHOLEBRAIN","t1_motion":"T1_MOTION","t1_otherart":"T1_OTHER_ARTIFACT","notes":"T1_COMMENTS"})
-
-    # ratings = ratings[['INDD','SCANDATE','SEQUENCE_NAME','RATER',"T1_WHOLEBRAIN", "T1_MOTION", "T1_OTHER_ARTIFACT", "T1_COMMENTS", "FILE_ID"]]
-    # print(ratings.info())
-    # ratings.to_csv(f"T1_QC_ratings_{current_datetime}.csv",index=False,header=True)
-    return
+    logging.info(f"{update_success} containers updated with new response data.")
+    ### TODO: add dataview to pull new copy of response info as it is in flywheel
 
 
-def main():
-    # ratings = download_postman_responses()
-    ratings = pd.read_csv("/Users/emilymcgrew/Library/CloudStorage/Box-Box/scripts/flywheel/get_qc_responses/ratings_responses_raw_20250828_102709.csv")
-    ratings_plus = add_response_to_flywheel(ratings)
-    # ratings_plus.to_csv(f"{res_type}_plus_{current_datetime}.csv",index=False,header=True)
-    # ratings_plus = pd.read_csv("/Users/emilymcgrew/Library/CloudStorage/Box-Box/scripts/flywheel/get_qc_responses/t1_image_qc_plus_20250828_140033.csv")
-    # save_copy_of_ratings(ratings_plus)
-
-
-logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
+logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.DEBUG)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-t","--response_type", choices = ["t1_image_qc","incidental_findings"], required=True, help="")
