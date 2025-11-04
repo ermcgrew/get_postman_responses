@@ -55,8 +55,6 @@ def update_flywheel_container(container, info, session_name):
 
 def main():
     ratings = download_postman_responses()
-    # ratings = pd.read_csv("/Users/emilymcgrew/Library/CloudStorage/Box-Box/scripts/flywheel/get_qc_responses/ratings_responses_raw_20250828_102709.csv")
-    # ratings = pd.read_csv("/Users/emilymcgrew/Library/CloudStorage/Box-Box/scripts/flywheel/get_qc_responses/ratings_responses_raw_incidental_findings_20250828_135718.csv")
     fw = flywheel.Client()
 
     ### if running weekly with the rename and create tasks script, identify new responses
