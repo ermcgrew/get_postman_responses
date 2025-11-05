@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source /Users/emilymcgrew/Library/CloudStorage/Box-Box/scripts/flywheel/get_qc_responses/config.py 
+source /project/wolk/Prisma3T/relong/scripts/get_postman_responses/config.py
 
 form_id=$1
 
