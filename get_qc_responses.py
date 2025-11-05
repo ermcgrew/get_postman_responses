@@ -5,12 +5,19 @@ from datetime import datetime, timedelta
 import flywheel
 import json 
 import logging
+import os
 import pandas as pd
 import subprocess
 import sys
 
 current_datetime=datetime.now().strftime("%Y%m%d_%H%M%S")
-weekago_dt = datetime.now() - timedelta(days=7)
+weekago_dt = datetime.now() - timedelta(days=9)
+
+qc_base_dir = "/project/wolk/Prisma3T/relong/QC/3TT1/flywheel_T1QC"
+raw_qc_dir = f"{qc_base_dir}/raw_responses"
+logdir = f"{qc_base_dir}/logs"
+qc_data_report_dir = f"{qc_base_dir}/data" 
+
 
 def download_postman_responses():
     result=subprocess.run(["./download_qc_reader_task.sh", form_id], capture_output=True, text=True) 
@@ -29,7 +36,7 @@ def download_postman_responses():
         df = pd.json_normalize(result_list[i], sep='_')
         ratings = pd.concat([ratings,df])
 
-    ratings.to_csv(f"ratings_responses_raw_{res_type}_{current_datetime}.csv", index=False, header=True)
+    ratings.to_csv(os.path.join(raw_qc_dir,f"ratings_responses_raw_{res_type}_{current_datetime}.csv"), index=False, header=True)
 
     return ratings
 
@@ -72,11 +79,20 @@ def main():
             info_toadd = {fw_info_key:{}}
             for col in ratings.columns:
                 if "response_data" in col:
-                    newname = f"{res_type}_" + "_".join(col.split("_")[-1:]) 
-                    info_toadd[fw_info_key][newname] = row[col]
+                    if "details" in col:
+                        newname = f"{res_type}_" + "_".join(col.split("_")[-2:]) 
+                        if type(row[col]) == list:
+                            ## only this field comes out as strings in a list
+                            valuetoadd = ";".join(row[col])
+                    else: 
+                        newname = f"{res_type}_" + "_".join(col.split("_")[-1:]) 
+                        valuetoadd = row[col]
+
+                    info_toadd[fw_info_key][newname] = valuetoadd
+
             info_toadd[fw_info_key][f"{res_type}_rater"] = row['origin_id'].split("@")[0]
             info_toadd[fw_info_key][f"{res_type}_completion_date"] = row['modified'].split("T")[0]
-
+            logging.info(f"info to add: {info_toadd}")
             ### get fw container to add the data to
             session = fw.get(row['parents_session'])
             session_name = session.label
@@ -102,9 +118,10 @@ def main():
 
     logging.info(f"{update_success} containers updated with new response data.")
     ### TODO: add dataview to pull new copy of response info as it is in flywheel
+    # os.path.join(qc_data_report_dir,"")
 
 
-logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.DEBUG)
+logging.basicConfig(filename = os.path.join(logdir,f"get_qc_response_log_{current_datetime}.txt"), filemode = "w", format="%(levelname)s: %(message)s", level=logging.DEBUG)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-t","--response_type", choices = ["t1_image_qc","incidental_findings"], required=True, help="")
