@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 current_datetime=datetime.now().strftime("%Y%m%d_%H%M%S")
-weekago_dt = datetime.now() - timedelta(days=9)
+weekago_dt = datetime.now() - timedelta(days=7)
 
 qc_base_dir = "/project/wolk/Prisma3T/relong/QC/3TT1/flywheel_T1QC"
 raw_qc_dir = f"{qc_base_dir}/raw_responses"
@@ -60,6 +60,17 @@ def update_flywheel_container(container, info, session_name):
         return 0
 
 
+def add_tag(fw_object,session_label):
+    if completed_tag not in fw_object.tags:
+        try:
+            fw_object.add_tag(completed_tag)
+            logging.info(f"{session_label}: added tag sucessfully") 
+        except:
+            logging.error(f"{session_label}: An error occurred when tagging.")
+    else:
+        logging.debug(f"{session_label}: already tagged.")
+
+
 def main():
     ratings = download_postman_responses()
     fw = flywheel.Client()
@@ -97,24 +108,24 @@ def main():
             session = fw.get(row['parents_session'])
             session_name = session.label
 
-            if res_type == "incidental_findings":
-                if does_info_exist(session,fw_info_key, session_name) == False:
-                    update_status = update_flywheel_container(session,info_toadd, session_name)
-                    update_success += update_status
-            else: 
-                ### get to fw file container via acqusition
+            if  res_type == "t1_image_qc":
                 try: 
                     acq = fw.get(row['parents_acquisition'])
                 except:
                     logging.warning('acq not found')
                     continue
                 this_acq = acq.reload()
-                file_rated = [f for f in this_acq.files if f.file_id == row['parents_file']][0]
-                if does_info_exist(file_rated,fw_info_key, session_name) == False:
-                    update_status = update_flywheel_container(file_rated,info_toadd, session_name)
+                container_to_update = [f for f in this_acq.files if f.file_id == row['parents_file']][0]
+            else:
+                container_to_update = session
+            
+            if does_info_exist(container_to_update, fw_info_key, session_name) == False:
+                    update_status = update_flywheel_container(container_to_update,info_toadd, session_name)
                     update_success += update_status
-
-                    ### TODO: if whole brain value == no or motion value > 3, add "unusable/quarantine" tag?
+                    if update_status == 1:
+                        ## Add 'completed' tag to container 
+                        add_tag(container_to_update, session_name)
+                        ### TODO: if whole brain value == no or motion value > 3, add "unusable/quarantine" tag?
 
     logging.info(f"{update_success} containers updated with new response data.")
     ### TODO: add dataview to pull new copy of response info as it is in flywheel
@@ -130,8 +141,10 @@ res_type = args.response_type
 
 if res_type == "t1_image_qc":
     form_id = "6478f1f774fcd84f2224bf7e"
+    completed_tag = "T1ImageQCdone"
 elif res_type == "incidental_findings":
     form_id = "64624766938e6547fa225ee6"
+    completed_tag = "IF_done"
 
 fw_info_key = res_type
 
