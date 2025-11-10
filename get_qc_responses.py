@@ -149,8 +149,5 @@ elif res_type == "incidental_findings":
 fw_info_key = res_type
 
 logging.info(f"running with response type {res_type}.")
-
-
-if __name__ == "__main__":
-    main()
+main()
 
